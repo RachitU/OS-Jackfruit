@@ -1,9 +1,10 @@
-solved
-.rootfs-base/
-results.md
-submissions/
+# Root filesystems (large, not for version control)
+rootfs-base/
+rootfs-alpha/
+rootfs-beta/
+rootfs-*/
 
-# Build artifacts (user-space)
+# Compiled binaries
 boilerplate/engine
 boilerplate/memory_hog
 boilerplate/cpu_hog
@@ -14,24 +15,14 @@ boilerplate/io_pulse
 *.o
 *.mod
 *.mod.c
-Module.symvers
+.*.cmd
 modules.order
-*.cmd
+Module.symvers
 .tmp_versions/
 
-# Root filesystems
-rootfs-base/
-rootfs-*/
+# Downloaded archives
 *.tar.gz
+*.zip
 
 # Logs
-*.log
-logs/
-
-# Runtime socket
-/tmp/mini_runtime.sock
-
-# Editor / OS junk
-*.swp
-*~
-.vscode/
+/tmp/

@@ -1,16 +1,9 @@
 /*
- * memory_hog.c - Memory pressure workload for soft / hard limit testing.
+ * memory_hog.c - Memory workload for container runtime testing
  *
- * Default behavior:
- *   - allocate 8 MiB every second
- *   - touch each page so RSS actually grows
- *
- * Usage:
- *   /memory_hog [chunk_mb] [sleep_ms]
- *
- * If you plan to copy this binary into an Alpine rootfs, build it in a way
- * that is runnable inside that filesystem, such as static linking or
- * rebuilding it from inside the rootfs/toolchain you choose.
+ * Usage: memory_hog <target_mb> <step_mb> <delay_ms>
+ *   Allocates <step_mb> every <delay_ms> ms until <target_mb> is reached.
+ *   Touches every page to ensure RSS actually grows.
  */
 
 #include <stdio.h>
@@ -18,47 +11,39 @@
 #include <string.h>
 #include <unistd.h>
 
-static size_t parse_size_mb(const char *arg, size_t fallback)
-{
-    char *end = NULL;
-    unsigned long value = strtoul(arg, &end, 10);
+int main(int argc, char *argv[]) {
+    long target_mb = 100;
+    long step_mb   = 10;
+    long delay_ms  = 500;
 
-    if (!arg || *arg == '\0' || (end && *end != '\0') || value == 0)
-        return fallback;
-    return (size_t)value;
-}
+    if (argc >= 2) target_mb = atol(argv[1]);
+    if (argc >= 3) step_mb   = atol(argv[2]);
+    if (argc >= 4) delay_ms  = atol(argv[3]);
 
-static useconds_t parse_sleep_ms(const char *arg, useconds_t fallback)
-{
-    char *end = NULL;
-    unsigned long value = strtoul(arg, &end, 10);
+    printf("[memory_hog] target=%ldMB step=%ldMB delay=%ldms\n",
+           target_mb, step_mb, delay_ms);
+    fflush(stdout);
 
-    if (!arg || *arg == '\0' || (end && *end != '\0'))
-        return fallback;
-    return (useconds_t)(value * 1000U);
-}
-
-int main(int argc, char *argv[])
-{
-    const size_t chunk_mb = (argc > 1) ? parse_size_mb(argv[1], 8) : 8;
-    const useconds_t sleep_us = (argc > 2) ? parse_sleep_ms(argv[2], 1000U) : 1000U * 1000U;
-    const size_t chunk_bytes = chunk_mb * 1024U * 1024U;
-    int count = 0;
-
-    while (1) {
-        char *mem = malloc(chunk_bytes);
-        if (!mem) {
-            printf("malloc failed after %d allocations\n", count);
+    long allocated_mb = 0;
+    while (allocated_mb < target_mb) {
+        long chunk = step_mb * 1024 * 1024;
+        char *p = malloc(chunk);
+        if (!p) {
+            fprintf(stderr, "[memory_hog] malloc failed at %ldMB\n", allocated_mb);
             break;
         }
-
-        memset(mem, 'A', chunk_bytes);
-        count++;
-        printf("allocation=%d chunk=%zuMB total=%zuMB\n",
-               count, chunk_mb, (size_t)count * chunk_mb);
+        /* Touch every page so the OS actually maps it (RSS grows) */
+        memset(p, 0xAA, chunk);
+        allocated_mb += step_mb;
+        printf("[memory_hog] Allocated %ldMB so far\n", allocated_mb);
         fflush(stdout);
-        usleep(sleep_us);
+        usleep((useconds_t)(delay_ms * 1000));
     }
 
+    printf("[memory_hog] Done. Sleeping to keep RSS alive...\n");
+    fflush(stdout);
+
+    /* Hold the memory so the monitor can observe it */
+    while (1) pause();
     return 0;
 }

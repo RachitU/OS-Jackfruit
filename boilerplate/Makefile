@@ -1,41 +1,58 @@
-obj-m += monitor.o
+# Makefile for OS-Jackfruit Multi-Container Runtime
+# Supports: make, make ci, make clean
 
-KDIR := /lib/modules/$(shell uname -r)/build
-PWD := $(shell pwd)
-# If you want host-built workload binaries to run directly inside an Alpine
-# rootfs, you can override this with WORKLOAD_LDFLAGS=-static when your
-# toolchain supports it.
-WORKLOAD_LDFLAGS ?= -static
+# Kernel build variables
+KDIR   ?= /lib/modules/$(shell uname -r)/build
+PWD    := $(shell pwd)
 
-USER_TARGETS := engine memory_hog cpu_hog io_pulse
+# Kernel module object
+obj-m  += monitor.o
 
-all: $(USER_TARGETS) module
+# User-space targets
+CC     := gcc
+CFLAGS := -Wall -Wextra -std=gnu11 -pthread -g
 
-ci: WORKLOAD_LDFLAGS =
-ci: $(USER_TARGETS)
+# All targets
+.PHONY: all clean ci userspace kmodule
 
-module: monitor.ko
+all: userspace kmodule
+
+# ---------------------------------------------------------------------------
+# User-space binaries
+# ---------------------------------------------------------------------------
+userspace: engine memory_hog cpu_hog io_pulse
 
 engine: engine.c monitor_ioctl.h
-	gcc -O2 -Wall -Wextra -o engine engine.c -lpthread
+	$(CC) $(CFLAGS) -o engine engine.c
 
 memory_hog: memory_hog.c
-	gcc -O2 -Wall $(WORKLOAD_LDFLAGS) -o memory_hog memory_hog.c
+	$(CC) $(CFLAGS) -o memory_hog memory_hog.c
 
 cpu_hog: cpu_hog.c
-	gcc -O2 -Wall $(WORKLOAD_LDFLAGS) -o cpu_hog cpu_hog.c
+	$(CC) $(CFLAGS) -o cpu_hog cpu_hog.c
 
 io_pulse: io_pulse.c
-	gcc -O2 -Wall $(WORKLOAD_LDFLAGS) -o io_pulse io_pulse.c
+	$(CC) $(CFLAGS) -o io_pulse io_pulse.c
 
-monitor.ko: monitor.c monitor_ioctl.h
+# ---------------------------------------------------------------------------
+# Kernel module
+# ---------------------------------------------------------------------------
+kmodule:
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
-clean:
-	if [ -d "$(KDIR)" ]; then $(MAKE) -C $(KDIR) M=$(PWD) clean; fi
-	rm -f $(USER_TARGETS) *.o *.mod *.mod.c *.symvers *.order
-	rm -f *.log
-	rm -rf logs
-	rm -f /tmp/mini_runtime.sock
+# ---------------------------------------------------------------------------
+# CI-safe build (no kernel module, no root needed)
+# ---------------------------------------------------------------------------
+ci: userspace
+	@echo "CI build complete (user-space only)."
+	@# Smoke-test: engine with no args must exit non-zero
+	@./engine 2>/dev/null; test $$? -ne 0 && echo "Smoke check passed." || (echo "Smoke check FAILED." && exit 1)
 
-.PHONY: all ci module clean
+# ---------------------------------------------------------------------------
+# Clean
+# ---------------------------------------------------------------------------
+clean:
+	rm -f engine memory_hog cpu_hog io_pulse
+	$(MAKE) -C $(KDIR) M=$(PWD) clean 2>/dev/null || true
+	rm -f *.o *.ko *.mod *.mod.c .*.cmd modules.order Module.symvers
+	rm -rf .tmp_versions

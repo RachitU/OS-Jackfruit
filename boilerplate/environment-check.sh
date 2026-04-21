@@ -1,116 +1,116 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+# environment-check.sh - VM environment preflight check for OS-Jackfruit
+# Must be run as root (sudo ./environment-check.sh)
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+set -e
 
-BUILD_ONLY=0
-if [[ "${1:-}" == "--build-only" ]]; then
-    BUILD_ONLY=1
-fi
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
-ok() {
-    echo "[OK] $1"
-}
+pass() { echo -e "${GREEN}[PASS]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+fail() { echo -e "${RED}[FAIL]${NC} $1"; FAIL=1; }
 
-warn() {
-    echo "[WARN] $1"
-}
+FAIL=0
 
-fail() {
-    echo "[FAIL] $1" >&2
+echo "=== OS-Jackfruit Environment Check ==="
+echo
+
+# Root check
+if [ "$EUID" -ne 0 ]; then
+    fail "Must run as root (sudo)"
     exit 1
-}
-
-echo "== Supervised Runtime Project Preflight =="
-
-if [[ -r /etc/os-release ]]; then
-    # shellcheck disable=SC1091
-    source /etc/os-release
-    [[ "${ID:-}" == "ubuntu" ]] || fail "Unsupported distro: ${ID:-unknown}. Use Ubuntu 22.04/24.04 VM."
-    case "${VERSION_ID:-}" in
-        22.04|24.04) ok "Ubuntu version ${VERSION_ID} detected." ;;
-        *) fail "Unsupported Ubuntu version: ${VERSION_ID:-unknown}. Use 22.04 or 24.04." ;;
-    esac
 else
-    fail "Cannot read /etc/os-release to verify environment."
+    pass "Running as root"
 fi
 
-if grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null || grep -qi microsoft /proc/version 2>/dev/null; then
-    fail "WSL detected. This project does not support WSL."
-fi
-ok "No WSL signature detected."
-
-if command -v systemd-detect-virt >/dev/null 2>&1; then
-    VIRT="$(systemd-detect-virt || true)"
-    [[ "$VIRT" != "none" ]] || fail "No VM detected. Use an Ubuntu VM for this project."
-    ok "Virtualized environment detected: $VIRT."
-else
-    warn "systemd-detect-virt not found; cannot strictly verify VM."
-fi
-
-if command -v mokutil >/dev/null 2>&1; then
-    SB_STATE="$(mokutil --sb-state 2>/dev/null || true)"
-    if echo "$SB_STATE" | grep -qi "SecureBoot enabled"; then
-        fail "Secure Boot is enabled. Disable it before module testing."
+# OS check
+if grep -q "Ubuntu" /etc/os-release 2>/dev/null; then
+    . /etc/os-release
+    pass "OS: $NAME $VERSION_ID"
+    if [[ "$VERSION_ID" != "22.04" && "$VERSION_ID" != "24.04" ]]; then
+        warn "Recommended Ubuntu 22.04 or 24.04 (got $VERSION_ID)"
     fi
-    if echo "$SB_STATE" | grep -qi "SecureBoot disabled"; then
-        ok "Secure Boot is disabled."
+else
+    fail "Not running Ubuntu – kernel module loading may not work"
+fi
+
+# Secure Boot check
+if command -v mokutil &>/dev/null; then
+    SB=$(mokutil --sb-state 2>&1)
+    if echo "$SB" | grep -q "SecureBoot disabled"; then
+        pass "Secure Boot: disabled"
     else
-        warn "Could not determine Secure Boot state via mokutil output."
+        fail "Secure Boot appears enabled – kernel module loading will fail. Disable in BIOS."
     fi
 else
-    warn "mokutil not installed; cannot auto-check Secure Boot state."
+    warn "mokutil not found – cannot check Secure Boot status"
 fi
 
-KBUILD_DIR="/lib/modules/$(uname -r)/build"
-[[ -d "$KBUILD_DIR" ]] || fail "Kernel headers missing for $(uname -r). Install linux-headers-$(uname -r)."
-ok "Kernel headers found at $KBUILD_DIR."
-
-echo "Building user targets and module..."
-LOG_FILE=$(mktemp /tmp/runtime_preflight_make.XXXXXX.log)
-if make all >"$LOG_FILE" 2>&1; then
-    ok "Boilerplate build succeeded."
+# WSL check
+if grep -qi "microsoft" /proc/version 2>/dev/null; then
+    fail "Running inside WSL – kernel modules and namespaces will NOT work"
 else
-    tail -n 20 "$LOG_FILE" || true
-    fail "Build failed. See $LOG_FILE for details."
-fi
-rm -f "$LOG_FILE"
-
-if [[ "$BUILD_ONLY" -eq 1 ]]; then
-    ok "Build-only mode complete. Skipped insmod/rmmod and /dev checks."
-    exit 0
+    pass "Not running in WSL"
 fi
 
-[[ "$(id -u)" -eq 0 ]] || fail "Run as root (sudo ./environment-check.sh) to verify insmod/rmmod and /dev/container_monitor."
+# Kernel headers
+KVER=$(uname -r)
+KDIR="/lib/modules/$KVER/build"
+if [ -d "$KDIR" ]; then
+    pass "Kernel headers found: $KDIR"
+else
+    fail "Kernel headers missing: $KDIR\n  Run: sudo apt install linux-headers-$(uname -r)"
+fi
 
-INSERTED_BY_SCRIPT=0
-cleanup() {
-    if [[ "$INSERTED_BY_SCRIPT" -eq 1 ]]; then
-        rmmod monitor >/dev/null 2>&1 || true
+# Build tools
+for tool in gcc make modprobe; do
+    if command -v $tool &>/dev/null; then
+        pass "$tool found: $(which $tool)"
+    else
+        fail "$tool not found – run: sudo apt install build-essential"
     fi
-}
-trap cleanup EXIT
-
-if lsmod | awk '{print $1}' | grep -qx monitor; then
-    ok "monitor module is already loaded."
-else
-    insmod ./monitor.ko
-    INSERTED_BY_SCRIPT=1
-    ok "insmod monitor.ko succeeded."
-fi
-
-for _ in $(seq 1 10); do
-    [[ -e /dev/container_monitor ]] && break
-    sleep 0.2
 done
-[[ -e /dev/container_monitor ]] || fail "/dev/container_monitor not found after module load."
-ok "/dev/container_monitor exists."
 
-if [[ "$INSERTED_BY_SCRIPT" -eq 1 ]]; then
-    rmmod monitor
-    INSERTED_BY_SCRIPT=0
-    ok "rmmod monitor succeeded."
+# Namespace support
+for ns in pid uts mnt; do
+    if [ -f "/proc/self/ns/$ns" ]; then
+        pass "Namespace supported: $ns"
+    else
+        fail "Namespace NOT supported: $ns (need real Linux kernel)"
+    fi
+done
+
+# User namespaces (optional but useful)
+if [ -f "/proc/sys/kernel/unprivileged_userns_clone" ]; then
+    VAL=$(cat /proc/sys/kernel/unprivileged_userns_clone)
+    if [ "$VAL" = "1" ]; then
+        pass "Unprivileged user namespaces: enabled"
+    else
+        warn "Unprivileged user namespaces: disabled (ok for root use)"
+    fi
 fi
 
-echo "Preflight passed."
+# chroot capability
+if unshare --pid --fork --mount-proc true 2>/dev/null; then
+    pass "unshare(2) works (namespace creation available)"
+else
+    fail "unshare(2) failed – namespace isolation will not work"
+fi
+
+# /tmp writable
+if touch /tmp/.engine_check_$$ 2>/dev/null && rm /tmp/.engine_check_$$; then
+    pass "/tmp is writable"
+else
+    fail "/tmp is not writable"
+fi
+
+echo
+if [ "$FAIL" -eq 0 ]; then
+    echo -e "${GREEN}All checks passed. Environment is ready.${NC}"
+else
+    echo -e "${RED}Some checks FAILED. Fix the issues above before proceeding.${NC}"
+    exit 1
+fi
