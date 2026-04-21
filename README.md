@@ -128,6 +128,9 @@ dmesg | tail -5
 
 ### Screenshot 1 — Multi-container supervision
 
+![Screenshot 1](screenshots/s1.png)
+
+
 Shows two containers (`alpha` and `beta`) running simultaneously under one supervisor PID.
 
 ```
@@ -140,6 +143,9 @@ Shows two containers (`alpha` and `beta`) running simultaneously under one super
 
 ### Screenshot 2 — Metadata tracking (`ps` output)
 
+![Screenshot 2](screenshots/s2.png)
+
+
 ```
 NAME             PID      STATE      SOFT(MB)   HARD(MB)   EXIT  SIG   LOG
 alpha            3421     running    0          0          0     0     /tmp/container_logs/alpha.log
@@ -149,6 +155,9 @@ beta             3498     running    0          0          0     0     /tmp/cont
 *Caption: `engine ps` showing live metadata for both containers.*
 
 ### Screenshot 3 — Bounded-buffer logging
+
+![Screenshot 3](screenshots/s3.png)
+
 
 ```
 cat /tmp/container_logs/alpha.log
@@ -162,6 +171,9 @@ hello
 
 ### Screenshot 4 — CLI and IPC
 
+![Screenshot 4](screenshots/s4.png)
+
+
 ```
 $ sudo ./engine stop alpha
 [engine] Sent SIGTERM to container 'alpha' (pid=3421)
@@ -172,6 +184,9 @@ OK: stopped alpha
 
 ### Screenshot 5 — Soft-limit warning
 
+![Screenshot 5](screenshots/s5.png)
+
+
 ```
 $ dmesg | grep monitor
 [monitor] PID 4012 RSS 52428 KB > soft limit 51200 KB – WARNING
@@ -180,6 +195,9 @@ $ dmesg | grep monitor
 *Caption: Kernel module logs a soft-limit warning when container RSS exceeds 50 MB.*
 
 ### Screenshot 6 — Hard-limit enforcement
+
+![Screenshot 6](screenshots/s6.png)
+
 
 ```
 $ dmesg | grep monitor
@@ -196,6 +214,9 @@ hog   4012   killed   50   100   0   9   /tmp/container_logs/hog.log
 
 ### Screenshot 7 — Scheduling experiment
 
+![Screenshot 7](screenshots/s7.png)
+
+
 CPU-bound experiment with different `nice` values (see Section 6 for full data):
 
 ```
@@ -206,6 +227,9 @@ CPU-bound experiment with different `nice` values (see Section 6 for full data):
 *Caption: Lower-priority container receives ~37% less CPU share under CFS, consistent with nice-value weighting.*
 
 ### Screenshot 8 — Clean teardown
+
+![Screenshot 8](screenshots/s8.png)
+
 
 ```
 [engine] Supervisor shutting down...
