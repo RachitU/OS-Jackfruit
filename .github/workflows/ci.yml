@@ -27,17 +27,16 @@ jobs:
 
       # The smoke test is already embedded in the `ci` make target:
       # ./engine with no arguments must print usage and exit non-zero.
-      # The step above already runs it; this step makes it explicit.
+      # This step makes it explicit in a shell-safe way.
       - name: Verify engine smoke test
         run: |
           cd boilerplate
-          # engine must exit non-zero when called with no args
-          ./engine 2>/dev/null; STATUS=$?
-          if [ "$STATUS" -eq 0 ]; then
+          if ./engine 2>/dev/null; then
             echo "FAIL: engine exited 0 with no arguments (expected non-zero)"
             exit 1
+          else
+            echo "PASS: engine exited non-zero with no arguments"
           fi
-          echo "PASS: engine exited $STATUS (non-zero) with no arguments"
 
       - name: Verify all user-space binaries were produced
         run: |
