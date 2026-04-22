@@ -1,8 +1,5 @@
 #!/bin/bash
-# demo.sh - Full demo sequence with screenshot prompts
-# Run AFTER setup_and_run.sh has completed.
-# Usage: sudo bash demo.sh
-# Keep a second terminal open with the supervisor running first!
+# demo.sh - Full demo sequence with AUTO screenshots
 
 set -e
 YELLOW='\033[1;33m'; GREEN='\033[0;32m'; NC='\033[0m'
@@ -11,107 +8,117 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENGINE="$REPO_DIR/boilerplate/engine"
 ROOTFS="$REPO_DIR/rootfs-alpha"
 
+# 🔥 AUTO SCREENSHOT FUNCTIO
 screenshot() {
-    echo ""
-    echo -e "${YELLOW}>>> SCREENSHOT $1: $2${NC}"
-    echo "    Press ENTER when you have taken the screenshot..."
-    read -r
+    USER_HOME=$(eval echo "~$SUDO_USER")
+    SHOT_DIR="$USER_HOME/Downloads/OS-Jackfruit/OS-Jackfruit/screenshots"
+    FILE="$SHOT_DIR/s${1}.png"
+
+    mkdir -p "$SHOT_DIR"
+    chown -R "$SUDO_USER:$SUDO_USER" "$SHOT_DIR"
+
+    # wait for terminal to settle
+    sleep 2
+
+    # take screenshot silently
+    sudo -u "$SUDO_USER" env DISPLAY="$DISPLAY" \
+        XDG_RUNTIME_DIR="/run/user/$(id -u "$SUDO_USER")" \
+        gnome-screenshot -f "$FILE" >/dev/null 2>&1
 }
 
 [ "$EUID" -ne 0 ] && { echo "Run with sudo"; exit 1; }
 
 echo -e "${GREEN}=== OS-Jackfruit Demo ===${NC}"
 echo ""
-echo "BEFORE YOU CONTINUE:"
-echo "  Open a SECOND terminal and run:"
-echo "    sudo $ENGINE supervisor $ROOTFS"
-echo "  Then come back here and press ENTER."
-read -r
 
-# ── Screenshot 1: Module loaded ──────────────────────────────────────
+echo "MAKE SURE supervisor is running in another terminal:"
+echo "sudo $ENGINE supervisor $ROOTFS"
+echo "Starting demo in 5 seconds..."
+sleep 5
+
+# ── Screenshot 1 ──────────────────────────────────────
 echo ""
 echo "=== Kernel module status ==="
 dmesg | grep -i monitor | tail -5
-ls -l /dev/container_monitor 2>/dev/null || echo "(device not found – module not loaded)"
-screenshot 1 "dmesg showing monitor module loaded + /dev/container_monitor exists"
+ls -l /dev/container_monitor 2>/dev/null || echo "(device not found)"
+screenshot 1 "Module loaded + device exists"
 
-# ── Start containers ─────────────────────────────────────────────────
+# ── Start containers ─────────────────────────────────
 echo ""
-echo "=== Starting containers alpha and beta ==="
-$ENGINE start alpha - /bin/sh -c 'while true; do echo hello-from-alpha; sleep 1; done'
+echo "=== Starting containers ==="
+$ENGINE start alpha - /bin/echo hello-from-alpha
 sleep 1
-$ENGINE start beta  - /bin/sh -c 'while true; do echo hello-from-beta; sleep 2; done'
+$ENGINE start beta - /bin/echo hello-from-beta
 sleep 3
 
-# ── Screenshot 2: ps output ───────────────────────────────────────────
+# ── Screenshot 2 ─────────────────────────────────────
 echo ""
-echo "=== Container list (ps) ==="
+echo "=== engine ps ==="
 $ENGINE ps
-screenshot 2 "engine ps showing alpha and beta in running state"
+screenshot 2 "alpha + beta running"
 
-# ── Screenshot 3: Log file ────────────────────────────────────────────
+# ── Screenshot 3 ─────────────────────────────────────
 echo ""
-echo "=== Log contents for alpha ==="
+echo "=== Logs ==="
 sleep 3
 cat /tmp/container_logs/alpha.log
-screenshot 3 "Log file showing output captured via bounded-buffer pipeline"
+screenshot 3 "alpha log output"
 
-# ── Screenshot 4: CLI stop command ───────────────────────────────────
+# ── Screenshot 4 ─────────────────────────────────────
 echo ""
-echo "=== Stopping alpha via CLI ==="
+echo "=== Stop alpha ==="
 $ENGINE stop alpha
 sleep 1
 $ENGINE ps
-screenshot 4 "CLI stop command sent over UNIX socket + ps showing alpha stopped"
+screenshot 4 "alpha stopped"
 
-# ── Screenshot 5 & 6: Memory limits ──────────────────────────────────
+# ── Screenshot 5 & 6 ────────────────────────────────
 echo ""
-echo "=== Starting memory_hog with soft=50MB hard=100MB ==="
+echo "=== Memory limits ==="
 $ENGINE start hog - soft=50 hard=100 /memory_hog 200 10 200
-echo "Waiting 30s for soft limit to trigger..."
+
+echo "Waiting 30s for soft limit..."
 sleep 30
-echo "=== dmesg - soft limit ==="
 dmesg | grep -i monitor | tail -10
-screenshot 5 "dmesg showing soft-limit WARNING for hog container"
+screenshot 5 "soft limit warning"
 
-echo "Waiting 60s for hard limit to trigger..."
+echo "Waiting 60s for hard limit..."
 sleep 60
-echo "=== dmesg - hard limit ==="
 dmesg | grep -i monitor | tail -10
 echo ""
-echo "=== ps after kill ==="
 $ENGINE ps
-screenshot 6 "dmesg showing hard-limit KILL + ps showing hog in killed state"
+screenshot 6 "hard limit kill"
 
-# ── Screenshot 7: Scheduling experiment ──────────────────────────────
+# ── Screenshot 7 ─────────────────────────────────────
 echo ""
-echo "=== Scheduling experiment: nice 0 vs nice 10 ==="
+echo "=== Scheduling test ==="
 $ENGINE start sched-hi - /bin/nice -n 0  /cpu_hog 20
 $ENGINE start sched-lo - /bin/nice -n 10 /cpu_hog 20
-echo "Running 20s CPU experiment..."
-sleep 22
-echo "--- sched-hi (nice 0) ---"
-cat /tmp/container_logs/sched-hi.log
-echo "--- sched-lo (nice 10) ---"
-cat /tmp/container_logs/sched-lo.log
-screenshot 7 "Both logs side by side showing different Miter/s (nice 0 vs nice 10)"
 
-# ── Screenshot 8: Clean teardown ──────────────────────────────────────
+sleep 22
+
+echo "--- sched-hi ---"
+cat /tmp/container_logs/sched-hi.log
+echo "--- sched-lo ---"
+cat /tmp/container_logs/sched-lo.log
+screenshot 7 "nice 0 vs nice 10"
+
+# ── Screenshot 8 ─────────────────────────────────────
 echo ""
-echo "=== Shutting down supervisor ==="
+echo "=== Shutdown ==="
 $ENGINE shutdown || true
 sleep 2
-echo "=== Zombie check (should be empty) ==="
-ps aux | grep defunct || echo "(no zombies found)"
-echo ""
-echo "=== Unloading kernel module ==="
-rmmod monitor 2>/dev/null && echo "monitor.ko unloaded" || echo "(already unloaded)"
-dmesg | tail -5
-screenshot 8 "No zombies in ps aux + dmesg showing module unloaded cleanly"
+
+echo "=== Zombie check ==="
+ps aux | grep defunct || echo "(no zombies)"
 
 echo ""
-echo -e "${GREEN}=== Demo complete! Now push to GitHub: ===${NC}"
-echo "  cd $REPO_DIR"
-echo "  git add -A"
-echo "  git commit -m 'Complete implementation with demo'"
-echo "  git push origin main"
+echo "=== Unload module ==="
+rmmod monitor 2>/dev/null && echo "unloaded" || echo "(already unloaded)"
+dmesg | tail -5
+
+screenshot 8 "cleanup complete"
+
+echo ""
+echo -e "${GREEN}=== Demo complete ===${NC}"
+echo "Screenshots saved in: screenshots/"
